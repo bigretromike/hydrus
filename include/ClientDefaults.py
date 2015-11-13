@@ -27,6 +27,7 @@ def GetClientDefaultOptions():
     options[ 'ac_timings' ] = ( 3, 500, 250 )
     options[ 'thread_checker_timings' ] = ( 3, 1200 )
     options[ 'idle_period' ] = 60 * 30
+    options[ 'idle_mouse_period' ] = 60 * 10
     options[ 'idle_cpu_max' ] = 50
     options[ 'idle_shutdown' ] = CC.IDLE_ON_SHUTDOWN_ASK_FIRST
     options[ 'idle_shutdown_max_minutes' ] = 30
@@ -45,6 +46,7 @@ def GetClientDefaultOptions():
     options[ 'confirm_archive' ] = True
     options[ 'delete_to_recycle_bin' ] = True
     options[ 'animation_start_position' ] = 0.0
+    options[ 'hide_preview' ] = False
     
     regex_favourites = []
     
@@ -300,11 +302,15 @@ def GetDefaultNamespacesAndSearchValue( gallery_identifier ):
         
         search_value = 'search tag'
         
-    elif site_type in ( HC.SITE_TYPE_HENTAI_FOUNDRY_ARTIST, HC.SITE_TYPE_HENTAI_FOUNDRY_TAGS ):
+    elif site_type in ( HC.SITE_TYPE_HENTAI_FOUNDRY, HC.SITE_TYPE_HENTAI_FOUNDRY_ARTIST, HC.SITE_TYPE_HENTAI_FOUNDRY_TAGS ):
         
         namespaces = [ 'creator', 'title', '' ]
         
-        if site_type == HC.SITE_TYPE_HENTAI_FOUNDRY_ARTIST:
+        if site_type == HC.SITE_TYPE_HENTAI_FOUNDRY:
+            
+            search_value = 'search'
+            
+        elif site_type == HC.SITE_TYPE_HENTAI_FOUNDRY_ARTIST:
             
             search_value = 'artist username'
             
@@ -318,11 +324,15 @@ def GetDefaultNamespacesAndSearchValue( gallery_identifier ):
         namespaces = [ 'creator', 'title', '' ]
         search_value = 'artist username'
         
-    elif site_type in ( HC.SITE_TYPE_PIXIV_ARTIST_ID, HC.SITE_TYPE_PIXIV_TAG ):
+    elif site_type in ( HC.SITE_TYPE_PIXIV, HC.SITE_TYPE_PIXIV_ARTIST_ID, HC.SITE_TYPE_PIXIV_TAG ):
         
         namespaces = [ 'creator', 'title', '' ]
         
-        if site_type == HC.SITE_TYPE_PIXIV_ARTIST_ID:
+        if site_type == HC.SITE_TYPE_PIXIV:
+            
+            search_value = 'search'
+            
+        elif site_type == HC.SITE_TYPE_PIXIV_ARTIST_ID:
             
             search_value = 'numerical artist id'
             
@@ -485,6 +495,17 @@ def GetDefaultBoorus():
     tag_classnames_to_namespaces = { 'tag-type-general' : '', 'tag-type-character' : 'character', 'tag-type-copyright' : 'series', 'tag-type-artist' : 'creator' }
     
     boorus[ 'sankaku chan' ] = ClientData.Booru( name, search_url, search_separator, advance_by_page_num, thumb_classname, image_id, image_data, tag_classnames_to_namespaces )
+    
+    name = 'rule34hentai'
+    search_url = 'http://rule34hentai.net/post/list/%tags%/%index%'
+    search_separator = '%20'
+    advance_by_page_num = True
+    thumb_classname = 'shm-thumb'
+    image_id = 'main_image'
+    image_data = None
+    tag_classnames_to_namespaces = { 'tag_name' : '' }
+    
+    boorus[ 'rule34hentai' ] = ClientData.Booru( name, search_url, search_separator, advance_by_page_num, thumb_classname, image_id, image_data, tag_classnames_to_namespaces )
     
     return boorus
     

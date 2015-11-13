@@ -2,8 +2,7 @@ import HydrusConstants as HC
 import HydrusAudioHandling
 import ClientDownloading
 import HydrusExceptions
-import HydrusFileHandling
-import HydrusImageHandling
+import HydrusPaths
 import HydrusSerialisable
 import HydrusThreading
 import ClientConstants as CC
@@ -152,7 +151,7 @@ def GenerateDumpMultipartFormDataCTAndBody( fields ):
     
     for ( name, field_type, value ) in fields:
         
-        if field_type in ( CC.FIELD_TEXT, CC.FIELD_COMMENT, CC.FIELD_PASSWORD, CC.FIELD_VERIFICATION_RECAPTCHA, CC.FIELD_THREAD_ID ): m.field( name, HydrusData.ToBytes( value ) )
+        if field_type in ( CC.FIELD_TEXT, CC.FIELD_COMMENT, CC.FIELD_PASSWORD, CC.FIELD_VERIFICATION_RECAPTCHA, CC.FIELD_THREAD_ID ): m.field( name, HydrusData.ToByteString( value ) )
         elif field_type == CC.FIELD_CHECKBOX:
             
             if value:
@@ -185,7 +184,7 @@ class CaptchaControl( wx.Panel ):
         
         self._captcha_challenge = None
         self._captcha_runs_out = 0
-        self._bitmap = wx.EmptyBitmap( 0, 0, 24 )
+        self._bitmap = wx.EmptyBitmap( 20, 20, 24 )
         
         self._timer = wx.Timer( self, ID_TIMER_CAPTCHA )
         self.Bind( wx.EVT_TIMER, self.TIMEREvent, id = ID_TIMER_CAPTCHA )
@@ -326,7 +325,7 @@ class CaptchaControl( wx.Panel ):
         
         self._captcha_challenge = None
         self._captcha_runs_out = 0
-        self._bitmap = wx.EmptyBitmap( 0, 0, 24 )
+        self._bitmap = wx.EmptyBitmap( 20, 20, 24 )
         
         self._DrawMain()
         self._DrawEntry()
@@ -339,7 +338,7 @@ class CaptchaControl( wx.Panel ):
         
         self._captcha_challenge = ''
         self._captcha_runs_out = 0
-        self._bitmap = wx.EmptyBitmap( 0, 0, 24 )
+        self._bitmap = wx.EmptyBitmap( 20, 20, 24 )
         
         self._DrawMain()
         self._DrawEntry()
@@ -383,7 +382,7 @@ class CaptchaControl( wx.Panel ):
         
         jpeg = HydrusGlobals.client_controller.DoHTTP( HC.GET, 'http://www.google.com/recaptcha/api/image?c=' + self._captcha_challenge )
         
-        ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+        ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
         
         try:
             
@@ -393,7 +392,7 @@ class CaptchaControl( wx.Panel ):
             
         finally:
             
-            HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+            HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
             
         
         self._captcha_runs_out = HydrusData.GetNow() + 5 * 60 - 15
@@ -650,7 +649,7 @@ class ManagementPanel( wx.lib.scrolledpanel.ScrolledPanel ):
     def SetSearchFocus( self, page_key ): pass
     
     def TestAbleToClose( self ): pass
-    
+    '''
 class ManagementPanelDumper( ManagementPanel ):
     
     def __init__( self, parent, page, management_controller ):
@@ -830,7 +829,7 @@ class ManagementPanelDumper( ManagementPanel ):
             
         except Exception as e:
             
-            ( status, phrase ) = ( 'big error', HydrusData.ToString( e ) )
+            ( status, phrase ) = ( 'big error', HydrusData.ToUnicode( e ) )
             
         
         wx.CallAfter( self.CALLBACKDoneDump, hash, post_field_info, status, phrase )
@@ -865,7 +864,7 @@ class ManagementPanelDumper( ManagementPanel ):
             
             total_size = sum( [ m.GetSize() for m in self._hashes_to_media.values() ] )
             
-            initial = 'Hydrus Network Client is starting a dump of ' + HydrusData.ToString( num_files ) + ' files, totalling ' + HydrusData.ConvertIntToBytes( total_size ) + ':' + os.linesep * 2
+            initial = 'Hydrus Network Client is starting a dump of ' + str( num_files ) + ' files, totalling ' + HydrusData.ConvertIntToBytes( total_size ) + ':' + os.linesep * 2
             
         else: initial = ''
         
@@ -1096,7 +1095,7 @@ class ManagementPanelDumper( ManagementPanel ):
         
         if self._next_dump_index == len( self._sorted_media_hashes ):
             
-            self._progress_info.SetLabel( 'done - ' + HydrusData.ToString( self._num_dumped ) + ' dumped' )
+            self._progress_info.SetLabel( 'done - ' + str( self._num_dumped ) + ' dumped' )
             
             self._start_button.Disable()
             
@@ -1365,22 +1364,22 @@ class ManagementPanelDumper( ManagementPanel ):
                     
                 except Exception as e:
                     
-                    ( status, phrase ) = ( 'big error', HydrusData.ToString( e ) )
+                    ( status, phrase ) = ( 'big error', HydrusData.ToUnicode( e ) )
                     
                     wx.CallAfter( self.CALLBACKDoneDump, hash, post_field_info, status, phrase )
                     
                 
-            else: self._progress_info.SetLabel( 'dumping next file in ' + HydrusData.ToString( time_left ) + ' seconds' )
+            else: self._progress_info.SetLabel( 'dumping next file in ' + str( time_left ) + ' seconds' )
             
         else:
             
             if self._num_dumped == 0: self._progress_info.SetLabel( 'will dump to ' + self._imageboard.GetName() )
-            else: self._progress_info.SetLabel( 'paused after ' + HydrusData.ToString( self._num_dumped ) + ' files dumped' )
+            else: self._progress_info.SetLabel( 'paused after ' + str( self._num_dumped ) + ' files dumped' )
             
         
     
 management_panel_types_to_classes[ MANAGEMENT_TYPE_DUMPER ] = ManagementPanelDumper
-
+'''
 class ManagementPanelGalleryImport( ManagementPanel ):
     
     def __init__( self, parent, page, management_controller ):
@@ -2542,7 +2541,6 @@ class ManagementPanelQuery( ManagementPanel ):
         if len( initial_predicates ) > 0 and not file_search_context.IsComplete(): wx.CallAfter( self._DoQuery )
         
         HydrusGlobals.client_controller.sub( self, 'AddMediaResultsFromQuery', 'add_media_results_from_query' )
-        HydrusGlobals.client_controller.sub( self, 'AddPredicate', 'add_predicate' )
         HydrusGlobals.client_controller.sub( self, 'ChangeFileRepositoryPubsub', 'change_file_repository' )
         HydrusGlobals.client_controller.sub( self, 'ChangeTagRepositoryPubsub', 'change_tag_repository' )
         HydrusGlobals.client_controller.sub( self, 'IncludeCurrent', 'notify_include_current' )
@@ -2550,7 +2548,6 @@ class ManagementPanelQuery( ManagementPanel ):
         HydrusGlobals.client_controller.sub( self, 'SearchImmediately', 'notify_search_immediately' )
         HydrusGlobals.client_controller.sub( self, 'ShowQuery', 'file_query_done' )
         HydrusGlobals.client_controller.sub( self, 'RefreshQuery', 'refresh_query' )
-        HydrusGlobals.client_controller.sub( self, 'RemovePredicate', 'remove_predicate' )
         
     
     def _DoQuery( self ):
@@ -2597,39 +2594,6 @@ class ManagementPanelQuery( ManagementPanel ):
     def AddMediaResultsFromQuery( self, query_key, media_results ):
         
         if query_key == self._query_key: HydrusGlobals.client_controller.pub( 'add_media_results', self._page_key, media_results, append = False )
-        
-    
-    def AddPredicate( self, page_key, predicate ): 
-        
-        if self._controller.GetVariable( 'search_enabled' ) and page_key == self._page_key:
-            
-            if predicate is not None:
-                
-                ( predicate_type, value, inclusive ) = predicate.GetInfo()
-                
-                if predicate_type in [ HC.PREDICATE_TYPE_SYSTEM_NUM_TAGS, HC.PREDICATE_TYPE_SYSTEM_LIMIT, HC.PREDICATE_TYPE_SYSTEM_SIZE, HC.PREDICATE_TYPE_SYSTEM_DIMENSIONS, HC.PREDICATE_TYPE_SYSTEM_AGE, HC.PREDICATE_TYPE_SYSTEM_HASH, HC.PREDICATE_TYPE_SYSTEM_DURATION, HC.PREDICATE_TYPE_SYSTEM_NUM_WORDS, HC.PREDICATE_TYPE_SYSTEM_MIME, HC.PREDICATE_TYPE_SYSTEM_RATING, HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, HC.PREDICATE_TYPE_SYSTEM_FILE_SERVICE ]:
-                    
-                    with ClientGUIDialogs.DialogInputFileSystemPredicates( self, predicate_type ) as dlg:
-                        
-                        if dlg.ShowModal() == wx.ID_OK: predicates = dlg.GetPredicates()
-                        else: return
-                        
-                    
-                elif predicate_type == HC.PREDICATE_TYPE_SYSTEM_UNTAGGED: predicates = ( ClientData.Predicate( HC.PREDICATE_TYPE_SYSTEM_NUM_TAGS, ( '=', 0 ) ), )
-                else:
-                    
-                    predicates = ( predicate, )
-                    
-                
-                for predicate in predicates:
-                    
-                    if self._current_predicates_box.HasPredicate( predicate ): self._current_predicates_box.RemovePredicate( predicate )
-                    else: self._current_predicates_box.AddPredicate( predicate )
-                    
-                
-            
-            self._DoQuery()
-            
         
     
     def ChangeFileRepositoryPubsub( self, page_key, service_key ):
@@ -2688,19 +2652,6 @@ class ManagementPanelQuery( ManagementPanel ):
     def RefreshQuery( self, page_key ):
         
         if page_key == self._page_key: self._DoQuery()
-        
-    
-    def RemovePredicate( self, page_key, predicate ):
-        
-        if page_key == self._page_key:
-            
-            if self._current_predicates_box.HasPredicate( predicate ):
-                
-                self._current_predicates_box.RemovePredicate( predicate )
-                
-                self._DoQuery()
-                
-            
         
     
     def SearchImmediately( self, page_key, value ):

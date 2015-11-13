@@ -43,6 +43,8 @@ class Controller( HydrusController.HydrusController ):
         
         HydrusGlobals.client_controller = self
         
+        self._last_mouse_position = None
+        
     
     def _InitDB( self ):
         
@@ -55,7 +57,7 @@ class Controller( HydrusController.HydrusController ):
             
             if dlg.ShowModal() == wx.ID_OK:
                 
-                path = dlg.GetPath()
+                path = HydrusData.ToUnicode( dlg.GetPath() )
                 
                 text = 'Are you sure "' + path + '" is the correct directory?'
                 text += os.linesep * 2
@@ -102,7 +104,10 @@ class Controller( HydrusController.HydrusController ):
         
         while not job_key.IsDone():
             
-            if HydrusGlobals.model_shutdown: return
+            if self._model_shutdown:
+                
+                return
+                
             
             time.sleep( 0.05 )
             
@@ -144,6 +149,31 @@ class Controller( HydrusController.HydrusController ):
                 self.pub( 'splash_set_status_text', 'waiting ' + str( i ) + ' seconds' )
                 
                 time.sleep( 1 )
+                
+            
+        
+    
+    def CheckMouseIdle( self ):
+        
+        mouse_position = wx.GetMousePosition()
+        
+        if self._last_mouse_position is None:
+            
+            self._last_mouse_position = mouse_position
+            
+        elif mouse_position != self._last_mouse_position:
+            
+            idle_before = self.CurrentlyIdle()
+            
+            self._timestamps[ 'last_mouse_action' ] = HydrusData.GetNow()
+            
+            self._last_mouse_position = mouse_position
+            
+            idle_after = self.CurrentlyIdle()
+            
+            if idle_before != idle_after:
+                
+                self.pub( 'refresh_status' )
                 
             
         
@@ -234,12 +264,48 @@ class Controller( HydrusController.HydrusController ):
     
     def CurrentlyIdle( self ):
         
-        if self._options[ 'idle_period' ] == 0:
+        # the existence of an idle test permits a True result
+        # any single fail vetoes a True
+        
+        possibly_idle = False
+        definitely_not_idle = False
+        
+        if self._options[ 'idle_period' ] > 0:
+            
+            if HydrusData.TimeHasPassed( self._timestamps[ 'last_user_action' ] + self._options[ 'idle_period' ] ):
+                
+                possibly_idle = True
+                
+            else:
+                
+                definitely_not_idle = True
+                
+            
+        
+        if self._options[ 'idle_mouse_period' ] > 0:
+            
+            if HydrusData.TimeHasPassed( self._timestamps[ 'last_mouse_action' ] + self._options[ 'idle_mouse_period' ] ):
+                
+                possibly_idle = True
+                
+            else:
+                
+                definitely_not_idle = True
+                
+            
+        
+        if definitely_not_idle:
             
             return False
             
-        
-        return HydrusData.TimeHasPassed( self._timestamps[ 'last_user_action' ] + self._options[ 'idle_period' ] )
+        elif possibly_idle:
+            
+            return True
+            
+        else:
+            
+            return False
+            
         
     
     def DoHTTP( self, *args, **kwargs ): return self._http.Request( *args, **kwargs )
@@ -279,7 +345,7 @@ class Controller( HydrusController.HydrusController ):
         
         try:
             
-            self._splash = ClientGUI.FrameSplash()
+            self._splash = ClientGUI.FrameSplash( self )
             
         except Exception as e:
             
@@ -295,7 +361,10 @@ class Controller( HydrusController.HydrusController ):
     
     def ForceIdle( self ):
         
-        self._timestamps[ 'last_user_action' ] = 0
+        del self._timestamps[ 'last_user_action' ]
+        del self._timestamps[ 'last_mouse_action' ]
+        
+        self._last_mouse_position = None
         
         self.pub( 'wake_daemons' )
         self.pub( 'refresh_status' )
@@ -402,7 +471,7 @@ class Controller( HydrusController.HydrusController ):
         
         def wx_code_gui():
             
-            self._gui = ClientGUI.FrameGUI()
+            self._gui = ClientGUI.FrameGUI( self )
             
             # this is because of some bug in wx C++ that doesn't add these by default
             wx.richtext.RichTextBuffer.AddHandler( wx.richtext.RichTextHTMLHandler() )
@@ -422,6 +491,7 @@ class Controller( HydrusController.HydrusController ):
         self.RestartBooru()
         
         self._daemons.append( HydrusThreading.DAEMONWorker( self, 'CheckImportFolders', ClientDaemons.DAEMONCheckImportFolders, ( 'notify_restart_import_folders_daemon', 'notify_new_import_folders' ), period = 180 ) )
+        self._daemons.append( HydrusThreading.DAEMONWorker( self, 'CheckMouseIdle', ClientDaemons.DAEMONCheckMouseIdle, period = 10 ) )
         self._daemons.append( HydrusThreading.DAEMONWorker( self, 'CheckExportFolders', ClientDaemons.DAEMONCheckExportFolders, ( 'notify_restart_export_folders_daemon', 'notify_new_export_folders' ), period = 180 ) )
         self._daemons.append( HydrusThreading.DAEMONWorker( self, 'DownloadFiles', ClientDaemons.DAEMONDownloadFiles, ( 'notify_new_downloads', 'notify_new_permissions' ), pre_callable_wait = 0 ) )
         self._daemons.append( HydrusThreading.DAEMONWorker( self, 'MaintainTrash', ClientDaemons.DAEMONMaintainTrash, init_wait = 60 ) )
@@ -433,7 +503,7 @@ class Controller( HydrusController.HydrusController ):
         self._daemons.append( HydrusThreading.DAEMONQueue( self, 'FlushRepositoryUpdates', ClientDaemons.DAEMONFlushServiceUpdates, 'service_updates_delayed', period = 5 ) )
         
         if HydrusGlobals.is_first_start: wx.CallAfter( self._gui.DoFirstStart )
-        if HydrusGlobals.is_db_updated: wx.CallLater( 1, HydrusData.ShowText, 'The client has updated to version ' + HydrusData.ToString( HC.SOFTWARE_VERSION ) + '!' )
+        if HydrusGlobals.is_db_updated: wx.CallLater( 1, HydrusData.ShowText, 'The client has updated to version ' + str( HC.SOFTWARE_VERSION ) + '!' )
         
     
     def MaintainDB( self ):
@@ -506,7 +576,10 @@ class Controller( HydrusController.HydrusController ):
         else: return text.lower()
         
     
-    def ResetIdleTimer( self ): self._timestamps[ 'last_user_action' ] = HydrusData.GetNow()
+    def ResetIdleTimer( self ):
+        
+        self._timestamps[ 'last_user_action' ] = HydrusData.GetNow()
+        
     
     def ResetPageChangeTimer( self ):
         
@@ -532,7 +605,7 @@ class Controller( HydrusController.HydrusController ):
                         connection = HydrusNetworking.GetLocalConnection( port )
                         connection.close()
                         
-                        text = 'The client\'s booru server could not start because something was already bound to port ' + HydrusData.ToString( port ) + '.'
+                        text = 'The client\'s booru server could not start because something was already bound to port ' + str( port ) + '.'
                         text += os.linesep * 2
                         text += 'This usually means another hydrus client is already running and occupying that port. It could be a previous instantiation of this client that has yet to shut itself down.'
                         text += os.linesep * 2
@@ -551,9 +624,9 @@ class Controller( HydrusController.HydrusController ):
                             
                         except Exception as e:
                             
-                            text = 'Tried to bind port ' + HydrusData.ToString( port ) + ' for the local booru, but it failed:'
+                            text = 'Tried to bind port ' + str( port ) + ' for the local booru, but it failed:'
                             text += os.linesep * 2
-                            text += HydrusData.ToString( e )
+                            text += HydrusData.ToUnicode( e )
                             
                             wx.CallLater( 1, HydrusData.ShowText, text )
                             
@@ -592,7 +665,7 @@ class Controller( HydrusController.HydrusController ):
                         connection = HydrusNetworking.GetLocalConnection( port )
                         connection.close()
                         
-                        text = 'The client\'s local server could not start because something was already bound to port ' + HydrusData.ToString( port ) + '.'
+                        text = 'The client\'s local server could not start because something was already bound to port ' + str( port ) + '.'
                         text += os.linesep * 2
                         text += 'This usually means another hydrus client is already running and occupying that port. It could be a previous instantiation of this client that has yet to shut itself down.'
                         text += os.linesep * 2
@@ -611,9 +684,9 @@ class Controller( HydrusController.HydrusController ):
                             
                         except Exception as e:
                             
-                            text = 'Tried to bind port ' + HydrusData.ToString( port ) + ' for the local server, but it failed:'
+                            text = 'Tried to bind port ' + str( port ) + ' for the local server, but it failed:'
                             text += os.linesep * 2
-                            text += HydrusData.ToString( e )
+                            text += HydrusData.ToUnicode( e )
                             
                             wx.CallLater( 1, HydrusData.ShowText, text )
                             
@@ -643,7 +716,7 @@ class Controller( HydrusController.HydrusController ):
             
             if dlg.ShowModal() == wx.ID_OK:
                 
-                path = dlg.GetPath()
+                path = HydrusData.ToUnicode( dlg.GetPath() )
                 
                 text = 'Are you sure you want to restore a backup from "' + path + '"?'
                 text += os.linesep * 2
@@ -688,7 +761,7 @@ class Controller( HydrusController.HydrusController ):
         
         try:
             
-            self._splash = ClientGUI.FrameSplash()
+            self._splash = ClientGUI.FrameSplash( self )
             
         except:
             

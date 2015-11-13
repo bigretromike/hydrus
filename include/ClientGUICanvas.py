@@ -12,6 +12,7 @@ import ClientRatings
 import collections
 import gc
 import HydrusImageHandling
+import HydrusPaths
 import HydrusTags
 import HydrusVideoHandling
 import os
@@ -25,7 +26,6 @@ import wx
 import wx.media
 import ClientRendering
 import HydrusData
-import HydrusFileHandling
 import HydrusGlobals
 
 if HC.PLATFORM_WINDOWS: import wx.lib.flashwin
@@ -131,7 +131,7 @@ class Animation( wx.Window ):
         
         self._paused = start_paused
         
-        self._canvas_bmp = wx.EmptyBitmap( 0, 0, 24 )
+        self._canvas_bmp = wx.EmptyBitmap( 20, 20, 24 )
         
         self._timer_video = wx.Timer( self, id = ID_TIMER_VIDEO )
         
@@ -287,6 +287,14 @@ class Animation( wx.Window ):
                 
                 self._canvas_bmp = wx.EmptyBitmap( my_width, my_height, 24 )
                 
+                dc = wx.MemoryDC( self._canvas_bmp )
+                
+                dc.SetBackground( wx.Brush( wx.Colour( *HC.options[ 'gui_colours' ][ 'media_background' ] ) ) )
+                
+                dc.Clear()
+                
+                del dc
+                
                 self._a_frame_has_been_drawn = False
                 
                 if self._video_container.HasFrame( self._current_frame_index ): self._DrawFrame()
@@ -342,7 +350,7 @@ class Animation( wx.Window ):
     
     def TIMEREventVideo( self, event ):
         
-        if self.IsShown():
+        if self.IsShownOnScreen():
             
             if self._current_frame_drawn:
                 
@@ -514,7 +522,7 @@ class AnimationBar( wx.Window ):
     
     def TIMEREventUpdate( self, event ):
         
-        if self.IsShown():
+        if self.IsShownOnScreen():
             
             if self._media.GetMime() == HC.APPLICATION_FLASH:
                 
@@ -577,7 +585,7 @@ class Canvas( object ):
         
         self.SetBackgroundColour( wx.Colour( *HC.options[ 'gui_colours' ][ 'media_background' ] ) )
         
-        self._canvas_bmp = wx.EmptyBitmap( 0, 0, 24 )
+        self._canvas_bmp = wx.EmptyBitmap( 20, 20, 24 )
         
         self.Bind( wx.EVT_SIZE, self.EventResize )
         
@@ -588,6 +596,7 @@ class Canvas( object ):
         HydrusGlobals.client_controller.sub( self, 'ZoomOut', 'canvas_zoom_out' )
         HydrusGlobals.client_controller.sub( self, 'ZoomSwitch', 'canvas_zoom_switch' )
         HydrusGlobals.client_controller.sub( self, 'OpenExternally', 'canvas_open_externally' )
+        HydrusGlobals.client_controller.sub( self, 'ManageTags', 'canvas_manage_tags' )
         
     
     def _Archive( self ): HydrusGlobals.client_controller.Write( 'content_updates', { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, ( self._current_display_media.GetHash(), ) ) ] } )
@@ -772,6 +781,7 @@ class Canvas( object ):
             with ClientGUIDialogsManage.DialogManageTags( self, self._file_service_key, ( self._current_display_media, ), canvas_key = self._canvas_key ) as dlg:
                 
                 dlg.ShowModal()
+                
             
         
     
@@ -784,7 +794,7 @@ class Canvas( object ):
             
             path = ClientFiles.GetFilePath( hash, mime )
             
-            HydrusFileHandling.LaunchFile( path )
+            HydrusPaths.LaunchFile( path )
             
             if self._current_display_media.HasDuration() and mime != HC.APPLICATION_FLASH:
                 
@@ -1023,6 +1033,14 @@ class Canvas( object ):
     
     def KeepCursorAlive( self ): pass
     
+    def ManageTags( self, canvas_key ):
+        
+        if canvas_key == self._canvas_key:
+            
+            self._ManageTags()
+            
+        
+    
     def MouseIsNearAnimationBar( self ):
         
         return self._media_container.MouseIsNearAnimationBar()
@@ -1052,15 +1070,22 @@ class Canvas( object ):
         
         if media is not None:
             
-            locations_manager = media.GetLocationsManager()
-            
-            if not locations_manager.HasLocal():
+            if not self.IsShownOnScreen():
                 
                 media = None
                 
-            elif HC.options[ 'mime_media_viewer_actions' ][ media.GetDisplayMedia().GetMime() ] == CC.MEDIA_VIEWER_DO_NOT_SHOW:
+            else:
                 
-                media = None
+                locations_manager = media.GetLocationsManager()
+                
+                if not locations_manager.HasLocal():
+                    
+                    media = None
+                    
+                elif HC.options[ 'mime_media_viewer_actions' ][ media.GetDisplayMedia().GetMime() ] == CC.MEDIA_VIEWER_DO_NOT_SHOW:
+                    
+                    media = None
+                    
                 
             
         
@@ -1146,7 +1171,10 @@ class CanvasWithDetails( Canvas ):
         
         ratings_services = HydrusGlobals.client_controller.GetServicesManager().GetServices( ( HC.RATINGS_SERVICES ) )
         
-        if len( ratings_services ) > 0: self._hover_ratings = ClientGUIHoverFrames.FullscreenHoverFrameRatings( self, self._canvas_key )
+        if len( ratings_services ) > 0:
+            
+            self._hover_ratings = ClientGUIHoverFrames.FullscreenHoverFrameRatings( self, self._canvas_key )
+            
         
     
     def _DrawBackgroundDetails( self, dc ):
@@ -1165,10 +1193,26 @@ class CanvasWithDetails( Canvas ):
             
             current = siblings_manager.CollapseTags( tags_manager.GetCurrent() )
             pending = siblings_manager.CollapseTags( tags_manager.GetPending() )
+            petitioned = siblings_manager.CollapseTags( tags_manager.GetPetitioned() )
             
-            tags_i_want_to_display = list( current.union( pending ) )
+            tags_i_want_to_display = set()
             
-            tags_i_want_to_display.sort()
+            tags_i_want_to_display.update( current )
+            tags_i_want_to_display.update( pending )
+            tags_i_want_to_display.update( petitioned )
+            
+            tags_i_want_to_display = list( tags_i_want_to_display )
+            
+            if HC.options[ 'default_tag_sort' ] == CC.SORT_BY_LEXICOGRAPHIC_DESC:
+                
+                reverse = True
+                
+            else:
+                
+                reverse = False
+                
+            
+            tags_i_want_to_display.sort( reverse = reverse )
             
             current_y = 3
             
@@ -1176,8 +1220,17 @@ class CanvasWithDetails( Canvas ):
             
             for tag in tags_i_want_to_display:
                 
-                if tag in current: display_string = tag
-                elif tag in pending: display_string = '(+) ' + tag
+                display_string = tag
+                
+                if tag in pending:
+                    
+                    display_string += ' (+)'
+                    
+                
+                if tag in petitioned:
+                    
+                    display_string += ' (-)'
+                    
                 
                 if ':' in tag:
                     
@@ -1186,7 +1239,10 @@ class CanvasWithDetails( Canvas ):
                     if namespace in namespace_colours: ( r, g, b ) = namespace_colours[ namespace ]
                     else: ( r, g, b ) = namespace_colours[ None ]
                     
-                else: ( r, g, b ) = namespace_colours[ '' ]
+                else:
+                    
+                    ( r, g, b ) = namespace_colours[ '' ]
+                    
                 
                 dc.SetTextForeground( wx.Colour( r, g, b ) )
                 
@@ -1315,6 +1371,13 @@ class CanvasWithDetails( Canvas ):
                 dc.DrawText( index_string, client_width - x - 3, client_height - y - 3 )
                 
             
+        
+    
+    def _GetInfoString( self ):
+        
+        info_string = self._current_media.GetPrettyInfo() + ' | ' + ClientData.ConvertZoomToPercentage( self._current_zoom ) + ' | ' + self._current_media.GetPrettyAge()
+        
+        return info_string
         
     
 class CanvasPanel( Canvas, wx.Window ):
@@ -1487,7 +1550,7 @@ class CanvasFullscreenMediaList( ClientMedia.ListeningMediaList, CanvasWithDetai
     
     def __init__( self, my_parent, page_key, media_results ):
         
-        ClientGUICommon.FrameThatResizes.__init__( self, my_parent, resize_option_prefix = 'fs_', title = 'hydrus client fullscreen media viewer' )
+        ClientGUICommon.FrameThatResizes.__init__( self, my_parent, resize_option_prefix = 'fs_', title = 'hydrus client media viewer' )
         CanvasWithDetails.__init__( self, HydrusGlobals.client_controller.GetCache( 'fullscreen' ) )
         ClientMedia.ListeningMediaList.__init__( self, CC.LOCAL_FILE_SERVICE_KEY, media_results )
         
@@ -1541,13 +1604,6 @@ class CanvasFullscreenMediaList( ClientMedia.ListeningMediaList, CanvasWithDetai
         
         if self.IsFullScreen(): self.ShowFullScreen( False, wx.FULLSCREEN_ALL )
         else: self.ShowFullScreen( True, wx.FULLSCREEN_ALL )
-        
-    
-    def _GetInfoString( self ):
-        
-        info_string = self._current_media.GetPrettyInfo() + ' | ' + ClientData.ConvertZoomToPercentage( self._current_zoom ) + ' | ' + self._current_media.GetPrettyAge()
-        
-        return info_string
         
     
     def _GetIndexString( self ):
@@ -3145,7 +3201,7 @@ class EmbedButton( wx.Window ):
         
         self._dirty = True
         
-        self._canvas_bmp = wx.EmptyBitmap( 0, 0, 24 )
+        self._canvas_bmp = wx.EmptyBitmap( 20, 20, 24 )
         
         self.Bind( wx.EVT_PAINT, self.EventPaint )
         self.Bind( wx.EVT_SIZE, self.EventResize )
@@ -3252,7 +3308,7 @@ class OpenExternallyButton( wx.Button ):
         
         path = ClientFiles.GetFilePath( hash, mime )
         
-        HydrusFileHandling.LaunchFile( path )
+        HydrusPaths.LaunchFile( path )
         
     
 class StaticImage( wx.Window ):
@@ -3267,7 +3323,7 @@ class StaticImage( wx.Window ):
         self._image_container = None
         self._image_cache = image_cache
         
-        self._canvas_bmp = wx.EmptyBitmap( 0, 0, 24 )
+        self._canvas_bmp = wx.EmptyBitmap( 20, 20, 24 )
         
         self._timer_render_wait = wx.Timer( self, id = ID_TIMER_RENDER_WAIT )
         
@@ -3285,12 +3341,12 @@ class StaticImage( wx.Window ):
     def _Redraw( self ):
         
         dc = wx.MemoryDC( self._canvas_bmp )
-    
+        
         dc.SetBackground( wx.Brush( wx.Colour( *HC.options[ 'gui_colours' ][ 'media_background' ] ) ) )
         
         dc.Clear()
         
-        if self._image_container.IsRendered():
+        if self._image_container is not None and self._image_container.IsRendered():
             
             hydrus_bitmap = self._image_container.GetHydrusBitmap()
             
@@ -3308,7 +3364,10 @@ class StaticImage( wx.Window ):
                 
                 wx.CallAfter( image.Destroy )
                 
-            else: wx_bitmap = hydrus_bitmap.GetWxBitmap()
+            else:
+                
+                wx_bitmap = hydrus_bitmap.GetWxBitmap()
+                
             
             dc.DrawBitmap( wx_bitmap, 0, 0 )
             
@@ -3359,7 +3418,10 @@ class StaticImage( wx.Window ):
             
             if my_width > 0 and my_height > 0:
                 
-                if self._image_container is None: self._image_container = self._image_cache.GetImage( self._media, ( my_width, my_height ) )
+                if self._image_container is None:
+                    
+                    self._image_container = self._image_cache.GetImage( self._media, ( my_width, my_height ) )
+                    
                 else:
                     
                     ( image_width, image_height ) = self._image_container.GetSize()
@@ -3378,14 +3440,17 @@ class StaticImage( wx.Window ):
                 
                 self._SetDirty()
                 
-                if not self._image_container.IsRendered(): self._timer_render_wait.Start( 16, wx.TIMER_CONTINUOUS )
+                if not self._image_container.IsRendered():
+                    
+                    self._timer_render_wait.Start( 16, wx.TIMER_CONTINUOUS )
+                    
                 
             
         
     
     def TIMEREventRenderWait( self, event ):
         
-        if self._image_container.IsRendered():
+        if self._image_container is not None and self._image_container.IsRendered():
             
             self._SetDirty()
             

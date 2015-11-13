@@ -8,6 +8,120 @@
 		<div class="content">
 			<h3>changelog</h3>
 			<ul>
+				<li><h3>version 181</h3></li>
+				<ul>
+					<li>fixed a potential bug in the server's db, very important you update this week if running on Windows</li>
+					<li>improved some thumbnail page calculation logic</li>
+					<li>improved some thumbnail page drawing logic</li>
+					<li>fixed broken vertical resize thumbnail grid issue</li>
+					<li>fixed some broken 'thumbnails have changed dimensions' event layout recalculation</li>
+					<li>fixed an idiotic typo bug that was making cached thumbnail page bmps taller or shorter than needed</li>
+					<li>thumbnail fading and other general thumbnail redraws should be a decent bit faster now</li>
+					<li>thumbnails have handed off all bmp storage responsibility to the thumbnail cache, which should mean greatly reduced memory use when browsing very large results</li>
+					<li>thumbnails will now only quick-draw if they have been seen before on the same page, which should reduced some page-refresh waterfall jankiness</li>
+					<li>thumbnail media panel double buffering seems to be working better</li>
+					<li>improved some general thumbnail drawing code</li>
+					<li>the media viewer background taglist will now show petitioned tags</li>
+					<li>the media viewer hover taglist should now look exactly like the background taglist (sorted lexicographically, no more counts, and now shows petitioned)</li>
+					<li>the 'selection tags' taglist will now show petitioned tags for 'all known tags' queries</li>
+					<li>the 'selection tags' taglist and the media viewer background and hover taglists will now count collapsed sibling tags correctly</li>
+					<li>all taglists now support ctrl+a to select all</li>
+					<li>improved some generic taglist value-setting code</li>
+					<li>parents should now only expand for their specific tag services</li>
+					<li>siblings, parents, and the pending count should now be correctly recalculated upon repository update processing</li>
+					<li>added 'copy sources' to the import status window's right-click menu so you can copy bad urls or whatever to the clipboard</li>
+					<li>added 'skip' to the import status window's right-click menu so you can skip urls you don't want</li>
+					<li>added default booru for rule34hentai.net</li>
+					<li>under certain circumstances, services with duplicate names could be created--any services like this will be renamed on update, and the loophole where this could happen is now closed</li>
+					<li>improved a locale number formatting call to ask for unicode</li>
+					<li>improved newgrounds parsing--mp4/wmv files should now work</li>
+					<li>the server logger has been formalised into a proper class</li>
+					<li>fixed some bad static image initialisation in the canvas code that was causing error spam</li>
+					<li>fixed default import tag options for hentai foundry and pixiv</li>
+					<li>copy->(bmp|path|local url) will now only appear as an option if the currently focussed media is local</li>
+					<li>fixed some gallery identifier print code</li>
+					<li>frames and dialogs will now clip their initial size to the current monitor's resolution--better scrollbar support for cramped windows will follow</li>
+					<li>updated ffmpeg static builds</li>
+					<li>updated sqlite command line exes</li>
+					<li>put off sqlite windows dll update because of critical server db bug</li>
+					<li>misc code cleanup and redaction</li>
+				</ul>
+				<li><h3>version 180</h3></li>
+				<ul>
+					<li>middle click on any taglist now does 'open a new search page for selection'</li>
+					<li>moved mouse idle checking code to the wx thread, which seems to have fixed a serious X11 crash</li>
+					<li>memory gunk should now be painted over when transparent animations are resized on linux</li>
+					<li>fixed some page up/down index calculation on the autocomplete dropdown</li>
+					<li>system predicates will remove themselves from the active predicate list silently again</li>
+					<li>system predicates will work again in queries that include tags!</li>
+					<li>greatly improved my string/unicode conversion code</li>
+					<li>dropped many inefficient unicode conversions from db code</li>
+					<li>improved the sql-grammar of some specifically efficient db code</li>
+					<li>removed incorrect unicode conversions from url/network request code</li>
+					<li>removed unicode conversion code from network response code</li>
+					<li>all directory iteration should now occur in unicode</li>
+					<li>all inputted paths should now be converted to unicode</li>
+					<li>replaced every single ugly raw path concatenation with a better method</li>
+					<li>improved some bitmap placeholder initialisation that was causing Linux terminal spam</li>
+					<li>added an option to always hide the preview window to options->gui</li>
+					<li>the preview window will not accept setmedia calls if it is hidden</li>
+					<li>if the preview window is actively hidden due to an unsplitting event, it will null its current media</li>
+					<li>fixed a shutdown calculation that was under-remembering the height of the preview window by four pixels every time</li>
+					<li>improved thumbnail waterfall code--it should be a little faster. less subject to lag when taxed, and waterfall with more genuine randomness</li>
+					<li>improved some thumbnail page drawing and clean/dirty conversion code</li>
+					<li>when pages are dirtied, any to-be-waterfalled thumbnails are cancelled, making superfast scrolling less crashtastic</li>
+					<li>new dirty thumbnail pages are now generated as needed, rather than precached</li>
+					<li>subscriptions will now correctly do a polite wait after fetching tags for redundant files</li>
+					<li>splash screen will now explicitly raise itself to the front on init</li>
+					<li>the export tag txts function of the export dialog now exports the tag txt to [filename].jpg.txt, rather than [filename].txt</li>
+					<li>the server now stores its updates in service specific subdirectories, like the client</li>
+					<li>some importers will better report when they are waiting politely</li>
+					<li>OS X (and anything else with OpenCV 3.0.0) now uses OpenCV to render gifs by default, falling back to PIL on error (like only Windows used to)</li>
+					<li>'open externally' from thumbnails now defocusses the preview window</li>
+					<li>refactored away a bunch of bad global controller references</li>
+					<li>added some shutdownexceptions</li>
+					<li>silenced shutdownexception terminal spam</li>
+					<li>reworded the 'maintenace and processing' options panel a little to explain things better</li>
+					<li>improved how the base_dir is figured out on program boot</li>
+					<li>improved serverside 'should I clean dirty updates?' check code</li>
+					<li>deleted some old code</li>
+					<li>split path-specific functions off from HydrusFileHandling to HydrusPaths and de-looped my import tree appropriately</li>
+					<li>general refactoring</li>
+				</ul>
+				<li><h3>version 179</h3></li>
+				<ul>
+					<li>all tag listboxes support multiple selection</li>
+					<li>all tag listboxes manipulate their data as sets of tags rather than individual tags</li>
+					<li>all tag listboxes report to their callbacks as sets of tags</li>
+					<li>many dialogs and other windows that use tag listboxes now deal with tags as sets</li>
+					<li>double clicking the media viewer's tag hover window now launches the manage tags dialog</li>
+					<li>the media viewer's tag hover window now includes (+1) counts like the manage tags dialog--harmonising the underlying canvas tag list will follow</li>
+					<li>lots of tag/sibling/parent code has been iterated over</li>
+					<li>ditched some misc redundant code and needlessly tightly coupled object relationships</li>
+					<li>some bizarro tag sibling dialog code has been rewritten</li>
+					<li>the autocomplete dropdown for 'writing' will now not expand search results to include parents when the receiving control isn't interested in them or it is otherwise not appropriate</li>
+					<li>when the autocomplete dropdown does have parents, they will be selected in a group with their child</li>
+					<li>the autocomplete dropdown for writing now broadcasts 'I'm done with tagging, close the dialog pls' in a better way</li>
+					<li>'activating' the sibling or parent dialogs' listcontrols (usually by hitting enter) now processes all rows that are selected, not just the first</li>
+					<li>manage siblings and parents dialogs can now take multiple initialising tags from the taglist right-click menu</li>
+					<li>removed some redundant listbox code</li>
+					<li>cleaned up and improved some tag list event processing</li>
+					<li>cleaned up some taglist right-click menu code</li>
+					<li>added system-wide mouse idle test to idle calculation. you can set this in files->options->maintenance and processing, and it defaults to ten minutes</li>
+					<li>import folders now support tag import options' explicit tags for multiple tags to any tag service</li>
+					<li>existing import folders will be updated to the new version, and if a local tag exists, it will be intserted into the new import tag options</li>
+					<li>fixed a hentai foundry page parsing bug</li>
+					<li>the deviant art downloader can now download >1024 pixel width versions of images via the download button (and a bit of cookie magic)</li>
+					<li>gallery page queries that 404 (like for a non-existent username) will now report 'Gallery 404' rather than spamming the gallery's whole custom 404 html page to the status box</li>
+					<li>fixed a bad layout flag that meant some namespace checkboxes in tag import options could remain hidden during first panel expand until first mouseover</li>
+					<li>the import status frame now initialises its status text properly</li>
+					<li>fixed last week's num_tags optimisations, which accidentally broke num_tags < x for x > 1</li>
+					<li>the client should work on both OpenCV 2.4.x and 3.0.0 (thankfully, the only difference for our purposes turned out to be some static variable renaming)</li>
+					<li>the Windows and OS X releases now come with OpenCV 3.0.0</li>
+					<li>increased the max period of import and export folders to 30 days</li>
+					<li>the launchfile/directory thread is now a daemon, so the (some flavours of Linux) client can shutdown even if an externally launched file/dir remains open</li>
+					<li>misc cleanup</li>
+				</ul>
 				<li><h3>version 178</h3></li>
 				<ul>
 					<li>import tag options now supports 'explicit tags', which will be added to all files imported</li>

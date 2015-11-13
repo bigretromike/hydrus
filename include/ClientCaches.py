@@ -6,6 +6,7 @@ import HydrusConstants as HC
 import HydrusExceptions
 import HydrusFileHandling
 import HydrusImageHandling
+import HydrusPaths
 import os
 import random
 import Queue
@@ -86,7 +87,7 @@ class DataCache( object ):
         
         with self._lock:
             
-            if key not in self._keys_to_data: raise Exception( 'Cache error! Looking for ' + HydrusData.ToString( key ) + ', but it was missing.' )
+            if key not in self._keys_to_data: raise Exception( 'Cache error! Looking for ' + HydrusData.ToUnicode( key ) + ', but it was missing.' )
             
             for ( i, ( fifo_key, last_access_time ) ) in enumerate( self._keys_fifo ):
                 
@@ -436,7 +437,12 @@ class ThumbnailCache( object ):
         
         self._data_cache = DataCache( 'thumbnail_cache_size' )
         
-        self._queue = Queue.Queue()
+        self._lock = threading.Lock()
+        
+        self._waterfall_queue_quick = set()
+        self._waterfall_queue_random = []
+        
+        self._waterfall_event = threading.Event()
         
         self._special_thumbs = {}
         
@@ -447,6 +453,23 @@ class ThumbnailCache( object ):
         HydrusGlobals.client_controller.sub( self, 'Clear', 'thumbnail_resize' )
         
     
+    def _RecalcWaterfallQueueRandom( self ):
+    
+        self._waterfall_queue_random = list( self._waterfall_queue_quick )
+        
+        random.shuffle( self._waterfall_queue_random )
+        
+    
+    def CancelWaterfall( self, page_key, medias ):
+        
+        with self._lock:
+            
+            self._waterfall_queue_quick.difference_update( ( ( page_key, media ) for media in medias ) )
+            
+            self._RecalcWaterfallQueueRandom()
+            
+        
+    
     def Clear( self ):
         
         self._data_cache.Clear()
@@ -455,13 +478,13 @@ class ThumbnailCache( object ):
         
         names = [ 'hydrus', 'flash', 'pdf', 'audio', 'video' ]
         
-        ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+        ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
         
         try:
             
             for name in names:
                 
-                path = HC.STATIC_DIR + os.path.sep + name + '.png'
+                path = os.path.join( HC.STATIC_DIR, name + '.png' )
                 
                 options = HydrusGlobals.client_controller.GetOptions()
                 
@@ -476,17 +499,19 @@ class ThumbnailCache( object ):
             
         finally:
             
-            HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+            HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
             
         
     
     def GetThumbnail( self, media ):
         
-        mime = media.GetDisplayMedia().GetMime()
+        display_media = media.GetDisplayMedia()
+        
+        mime = display_media.GetMime()
         
         if mime in HC.MIMES_WITH_THUMBNAILS:
             
-            hash = media.GetDisplayMedia().GetHash()
+            hash = display_media.GetHash()
             
             if not self._data_cache.HasData( hash ):
                 
@@ -517,7 +542,35 @@ class ThumbnailCache( object ):
         else: return self._special_thumbs[ 'hydrus' ]
         
     
-    def Waterfall( self, page_key, medias ): self._queue.put( ( page_key, medias ) )
+    def HasThumbnailCached( self, media ):
+        
+        display_media = media.GetDisplayMedia()
+        
+        mime = display_media.GetMime()
+        
+        if mime in HC.MIMES_WITH_THUMBNAILS:
+            
+            hash = display_media.GetHash()
+            
+            return self._data_cache.HasData( hash )
+            
+        else:
+            
+            return True
+            
+        
+    
+    def Waterfall( self, page_key, medias ):
+        
+        with self._lock:
+            
+            self._waterfall_queue_quick.update( ( ( page_key, media ) for media in medias ) )
+            
+            self._RecalcWaterfallQueueRandom()
+            
+        
+        self._waterfall_event.set()
+        
     
     def DAEMONWaterfall( self ):
         
@@ -525,25 +578,47 @@ class ThumbnailCache( object ):
         
         while not HydrusGlobals.view_shutdown:
             
-            try: ( page_key, medias ) = self._queue.get( timeout = 1 )
-            except Queue.Empty: continue
+            with self._lock:
+                
+                do_wait = len( self._waterfall_queue_random ) == 0
+                
+            
+            if do_wait:
+                
+                self._waterfall_event.wait( 1 )
+                
+                self._waterfall_event.clear()
+                
+                last_paused = HydrusData.GetNowPrecise()
+                
+            
+            with self._lock:
+                
+                if len( self._waterfall_queue_random ) == 0:
+                    
+                    continue
+                    
+                else:
+                    
+                    result = self._waterfall_queue_random.pop( 0 )
+                    
+                    self._waterfall_queue_quick.discard( result )
+                    
+                    ( page_key, media ) = result
+                    
+                
             
             try:
                 
-                random.shuffle( medias )
+                thumbnail = self.GetThumbnail( media ) # to load it
                 
-                for media in medias:
+                HydrusGlobals.client_controller.pub( 'waterfall_thumbnail', page_key, media )
+                
+                if HydrusData.GetNowPrecise() - last_paused > 0.005:
                     
-                    thumbnail = self.GetThumbnail( media )
+                    time.sleep( 0.00001 )
                     
-                    HydrusGlobals.client_controller.pub( 'waterfall_thumbnail', page_key, media, thumbnail )
-                    
-                    if HydrusData.GetNowPrecise() - last_paused > 0.005:
-                        
-                        time.sleep( 0.00001 )
-                        
-                        last_paused = HydrusData.GetNowPrecise()
-                        
+                    last_paused = HydrusData.GetNowPrecise()
                     
                 
             except Exception as e:
@@ -615,7 +690,10 @@ def CollapseTagSiblingChains( processed_siblings ):
     
     reverse_lookup = collections.defaultdict( list )
     
-    for ( old_tag, new_tag ) in siblings.items(): reverse_lookup[ new_tag ].append( old_tag )
+    for ( old_tag, new_tag ) in siblings.items():
+        
+        reverse_lookup[ new_tag ].append( old_tag )
+        
     
     return ( siblings, reverse_lookup )
     
@@ -784,6 +862,8 @@ class TagParentsManager( object ):
     
     def __init__( self ):
         
+        self._service_keys_to_children_to_parents = collections.defaultdict( HydrusData.default_dict_list )
+        
         self._RefreshParents()
         
         self._lock = threading.Lock()
@@ -844,9 +924,6 @@ class TagParentsManager( object ):
     
     def ExpandPredicates( self, service_key, predicates ):
         
-        # for now -- we will make an option, later
-        service_key = CC.COMBINED_TAG_SERVICE_KEY
-        
         results = []
         
         with self._lock:
@@ -878,12 +955,12 @@ class TagParentsManager( object ):
         
         with self._lock:
             
-            # for now -- we will make an option, later
-            service_key = CC.COMBINED_TAG_SERVICE_KEY
-            
             tags_results = set( tags )
             
-            for tag in tags: tags_results.update( self._service_keys_to_children_to_parents[ service_key ][ tag ] )
+            for tag in tags:
+                
+                tags_results.update( self._service_keys_to_children_to_parents[ service_key ][ tag ] )
+                
             
             return tags_results
             
@@ -893,16 +970,16 @@ class TagParentsManager( object ):
         
         with self._lock:
             
-            # for now -- we will make an option, later
-            service_key = CC.COMBINED_TAG_SERVICE_KEY
-            
             return self._service_keys_to_children_to_parents[ service_key ][ tag ]
             
         
     
     def RefreshParents( self ):
         
-        with self._lock: self._RefreshParents()
+        with self._lock:
+            
+            self._RefreshParents()
+            
         
     
 class TagSiblingsManager( object ):
@@ -914,6 +991,11 @@ class TagSiblingsManager( object ):
         self._lock = threading.Lock()
         
         HydrusGlobals.client_controller.sub( self, 'RefreshSiblings', 'notify_new_siblings' )
+        
+    
+    def _CollapseTags( self, tags ):
+        
+        return { self._siblings[ tag ] if tag in self._siblings else tag for tag in tags }
         
     
     def _RefreshSiblings( self ):
@@ -1077,9 +1159,27 @@ class TagSiblingsManager( object ):
             
         
     
+    def CollapseStatusesToTags( self, statuses_to_tags ):
+        
+        with self._lock:
+            
+            statuses = statuses_to_tags.keys()
+            
+            for status in statuses:
+                
+                statuses_to_tags[ status ] = self._CollapseTags( statuses_to_tags[ status ] )
+                
+            
+            return statuses_to_tags
+            
+        
+    
     def CollapseTags( self, tags ):
         
-        with self._lock: return { self._siblings[ tag ] if tag in self._siblings else tag for tag in tags }
+        with self._lock:
+            
+            return self._CollapseTags( tags )
+            
         
     
     def CollapseTagsToCount( self, tags_to_count ):
@@ -1126,6 +1226,12 @@ class WebSessionManagerClient( object ):
             
             # name not found, or expired
             
+            if name == 'deviant art':
+                
+                ( response_gumpf, cookies ) = HydrusGlobals.client_controller.DoHTTP( HC.GET, 'http://www.deviantart.com/', return_cookies = True )
+                
+                expires = now + 30 * 86400
+                
             if name == 'hentai foundry':
                 
                 ( response_gumpf, cookies ) = HydrusGlobals.client_controller.DoHTTP( HC.GET, 'http://www.hentai-foundry.com/?enterAgree=1', return_cookies = True )

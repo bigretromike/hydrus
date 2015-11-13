@@ -5,6 +5,7 @@ import ClientDownloading
 import HydrusExceptions
 import HydrusFileHandling
 import HydrusNATPunch
+import HydrusPaths
 import HydrusSerialisable
 import HydrusTagArchive
 import HydrusTags
@@ -52,8 +53,14 @@ def ExportToHTA( parent, service_key, hashes ):
     
     with wx.FileDialog( parent, style = wx.FD_SAVE, defaultFile = 'archive.db' ) as dlg:
         
-        if dlg.ShowModal() == wx.ID_OK: path = dlg.GetPath()
-        else: return
+        if dlg.ShowModal() == wx.ID_OK:
+            
+            path = HydrusData.ToUnicode( dlg.GetPath() )
+            
+        else:
+            
+            return
+            
         
     
     message = 'Would you like to use hydrus\'s normal hash type, or an alternative?'
@@ -238,7 +245,7 @@ class Dialog( wx.Dialog ):
         
         self.SetBackgroundColour( wx.SystemSettings.GetColour( wx.SYS_COLOUR_BTNFACE ) )
         
-        self.SetIcon( wx.Icon( HC.STATIC_DIR + os.path.sep + 'hydrus.ico', wx.BITMAP_TYPE_ICO ) )
+        self.SetIcon( wx.Icon( os.path.join( HC.STATIC_DIR, 'hydrus.ico' ), wx.BITMAP_TYPE_ICO ) )
         
         self.Bind( wx.EVT_BUTTON, self.EventDialogButton )
         
@@ -253,6 +260,11 @@ class Dialog( wx.Dialog ):
     def EventDialogButton( self, event ): self.EndModal( event.GetId() )
     
     def SetInitialSize( self, ( width, height ) ):
+        
+        ( display_width, display_height ) = wx.GetDisplaySize()
+        
+        width = min( display_width, width )
+        height = min( display_height, height )
         
         wx.Dialog.SetInitialSize( self, ( width, height ) )
         
@@ -286,7 +298,9 @@ class DialogAdvancedContentUpdate( Dialog ):
             self._go = wx.Button( self._internal_actions, label = 'Go!' )
             self._go.Bind( wx.EVT_BUTTON, self.EventGo )
             
-            self._tag_input = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._internal_actions, self.SetSomeTag, CC.COMBINED_FILE_SERVICE_KEY, self._service_key )
+            expand_parents = False
+            
+            self._tag_input = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._internal_actions, self.SetSomeTags, expand_parents, CC.COMBINED_FILE_SERVICE_KEY, self._service_key )
             self._specific_tag = wx.StaticText( self._internal_actions, label = '', size = ( 100, -1 ) )
             
             self._import_from_hta = wx.Button( self._internal_actions, label = 'one-time mass import or delete using a hydrus tag archive' )
@@ -418,6 +432,9 @@ class DialogAdvancedContentUpdate( Dialog ):
     
     def EventGo( self, event ):
         
+        # at some point, rewrite this to cope with multiple tags. setsometag is ready to go on that front
+        # this should prob be with a listbox so people can enter their new multiple tags in several separate goes, rather than overwriting every time
+        
         with DialogYesNo( self, 'Are you sure?' ) as dlg:
             
             if dlg.ShowModal() != wx.ID_YES: return
@@ -468,20 +485,21 @@ class DialogAdvancedContentUpdate( Dialog ):
             
             if dlg_file.ShowModal() == wx.ID_OK:
                 
-                path = dlg_file.GetPath()
+                path = HydrusData.ToUnicode( dlg_file.GetPath() )
                 
                 ImportFromHTA( self, path, self._service_key )
                 
             
         
     
-    def SetSomeTag( self, tag, parents = None ):
+    def SetSomeTags( self, tags ):
         
-        if parents is None: parents = []
-        
-        self._tag = tag
-        
-        self._specific_tag.SetLabel( tag )
+        if len( tags ) > 0:
+            
+            self._tag = list( tags )[0]
+            
+            self._specific_tag.SetLabel( self._tag )
+            
         
     
 class DialogButtonChoice( Dialog ):
@@ -844,7 +862,10 @@ class DialogInputCustomFilterAction( Dialog ):
             
             self._tag_service_keys = wx.Choice( self._tag_panel )
             self._tag_value = wx.TextCtrl( self._tag_panel, style = wx.TE_READONLY )
-            self._tag_input = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._tag_panel, self.SetTag, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY )
+            
+            expand_parents = False
+            
+            self._tag_input = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._tag_panel, self.SetTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_TAG_SERVICE_KEY )
             
             self._ok_tag = wx.Button( self._tag_panel, label = 'ok' )
             self._ok_tag.Bind( wx.EVT_BUTTON, self.EventOKTag )
@@ -1120,7 +1141,7 @@ class DialogInputCustomFilterAction( Dialog ):
                 
                 value = self._ratings_numerical_slider.GetValue()
                 
-                self._pretty_action = HydrusData.ToString( value )
+                self._pretty_action = HydrusData.ToUnicode( value )
                 
                 num_stars = self._current_ratings_numerical_service.GetInfo( 'num_stars' )
                 allow_zero = self._current_ratings_numerical_service.GetInfo( 'allow_zero' )
@@ -1141,6 +1162,8 @@ class DialogInputCustomFilterAction( Dialog ):
         
     
     def EventOKTag( self, event ):
+        
+        # this could support multiple tags now
         
         selection = self._tag_service_keys.GetSelection()
         
@@ -1175,11 +1198,14 @@ class DialogInputCustomFilterAction( Dialog ):
         return ( ( pretty_modifier, pretty_key, pretty_service_key, self._pretty_action ), ( modifier, key, self._service_key, self._action ) )
         
     
-    def SetTag( self, tag, parents = None ):
+    def SetTags( self, tags ):
         
-        if parents is None: parents = []
-        
-        self._tag_value.SetValue( tag )
+        if len( tags ) > 0:
+            
+            tag = list( tags )[0]
+            
+            self._tag_value.SetValue( tag )
+            
         
     
 class DialogInputFileSystemPredicates( Dialog ):
@@ -1540,6 +1566,8 @@ class DialogInputLocalFiles( Dialog ):
     
     def _AddPathsToList( self, paths ):
         
+        paths = [ HydrusData.ToUnicode( path ) for path in paths ]
+        
         self._processing_queue.append( paths )
         
         self._ProcessQueue()
@@ -1607,7 +1635,7 @@ class DialogInputLocalFiles( Dialog ):
             
             if dlg.ShowModal() == wx.ID_OK:
                 
-                paths = dlg.GetPaths()
+                paths = [ HydrusData.ToUnicode( path ) for path in dlg.GetPaths() ]
                 
                 self._AddPathsToList( paths )
                 
@@ -1620,7 +1648,7 @@ class DialogInputLocalFiles( Dialog ):
             
             if dlg.ShowModal() == wx.ID_OK:
                 
-                path = dlg.GetPath()
+                path = HydrusData.ToUnicode( dlg.GetPath() )
                 
                 self._AddPathsToList( ( path, ) )
                 
@@ -1739,7 +1767,10 @@ class DialogInputLocalFiles( Dialog ):
         
         for ( i, path ) in enumerate( file_paths ):
             
-            if path.endswith( os.path.sep + 'Thumbs.db' ) or path.endswith( os.path.sep + 'thumbs.db' ): continue
+            if path.endswith( os.path.sep + 'Thumbs.db' ) or path.endswith( os.path.sep + 'thumbs.db' ):
+                
+                continue
+                
             
             if i % 500 == 0: gc.collect()
             
@@ -1788,14 +1819,14 @@ class DialogInputLocalFiles( Dialog ):
         if num_good_files > 0:
             
             if num_good_files == 1: message = '1 file was parsed successfully'
-            else: message = HydrusData.ToString( num_good_files ) + ' files were parsed successfully'
+            else: message = str( num_good_files ) + ' files were parsed successfully'
             
-            if num_odd_files > 0: message += ', but ' + HydrusData.ToString( num_odd_files ) + ' failed.'
+            if num_odd_files > 0: message += ', but ' + str( num_odd_files ) + ' failed.'
             else: message += '.'
             
         else:
             
-            message = HydrusData.ToString( num_odd_files ) + ' files could not be parsed.'
+            message = str( num_odd_files ) + ' files could not be parsed.'
             
         
         wx.CallAfter( self.SetGaugeInfo, num_file_paths, num_file_paths, message )
@@ -2051,11 +2082,11 @@ class DialogInputMessageSystemPredicate( Dialog ):
     
     def GetString( self ):
         
-        if self._type == 'system:age': return 'system:age' + self._sign.GetStringSelection() + HydrusData.ToString( self._years.GetValue() ) + 'y' + HydrusData.ToString( self._months.GetValue() ) + 'm' + HydrusData.ToString( self._days.GetValue() ) + 'd'
+        if self._type == 'system:age': return 'system:age' + self._sign.GetStringSelection() + str( self._years.GetValue() ) + 'y' + str( self._months.GetValue() ) + 'm' + str( self._days.GetValue() ) + 'd'
         elif self._type == 'system:started_by': return 'system:started_by=' + self._contact.GetStringSelection()
         elif self._type == 'system:from': return 'system:from=' + self._contact.GetStringSelection()
         elif self._type == 'system:to': return 'system:to=' + self._contact.GetStringSelection()
-        elif self._type == 'system:numattachments': return 'system:numattachments' + self._sign.GetStringSelection() + HydrusData.ToString( self._num_attachments.GetValue() )
+        elif self._type == 'system:numattachments': return 'system:numattachments' + self._sign.GetStringSelection() + str( self._num_attachments.GetValue() )
         
     
 class DialogInputNamespaceRegex( Dialog ):
@@ -2134,7 +2165,7 @@ class DialogInputNamespaceRegex( Dialog ):
             
             text = 'That regex would not compile!'
             text += os.linesep * 2
-            text += HydrusData.ToString( e )
+            text += HydrusData.ToUnicode( e )
             
             wx.MessageBox( text )
             
@@ -2460,7 +2491,9 @@ class DialogInputTags( Dialog ):
         
         self._tags = ClientGUICommon.ListBoxTagsStrings( self )
         
-        self._tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self, self.AddTag, CC.LOCAL_FILE_SERVICE_KEY, service_key )
+        expand_parents = True
+        
+        self._tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self, self.EnterTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key, null_entry_callable = self.Ok )
         
         self._ok = wx.Button( self, id= wx.ID_OK, label = 'Ok' )
         self._ok.SetForegroundColour( ( 0, 128, 0 ) )
@@ -2496,23 +2529,28 @@ class DialogInputTags( Dialog ):
         wx.CallAfter( self._tag_box.SetFocus )
         
 
-    def AddTag( self, tag, parents = None ):
+    def EnterTags( self, tags, parents = None ):
         
-        if parents is None: parents = []
+        if parents is None:
+            
+            parents = []
+            
         
-        if tag is None:
+        if len( tags ) > 0:
             
-            self.EndModal( wx.ID_OK )
-            
-        else:
-            
-            self._tags.AddTag( tag, parents )
+            self._tags.EnterTags( tags )
+            self._tags.AddTags( parents )
             
         
     
     def GetTags( self ):
         
         return self._tags.GetTags()
+        
+    
+    def Ok( self ):
+        
+        self.EndModal( wx.ID_OK )
         
     
 class DialogInputUPnPMapping( Dialog ):
@@ -2667,7 +2705,7 @@ class DialogModifyAccounts( Dialog ):
                 
                 response = self._service.Request( HC.GET, 'account_info', { 'subject_identifier' : subject_identifier } )
                 
-                subject_string = HydrusData.ToString( response[ 'account_info' ] )
+                subject_string = HydrusData.ToUnicode( response[ 'account_info' ] )
                 
             else: subject_string = 'modifying ' + HydrusData.ConvertIntToPrettyString( len( self._subject_identifiers ) ) + ' accounts'
             
@@ -2784,7 +2822,7 @@ class DialogModifyAccounts( Dialog ):
             
             account_info = response[ 'account_info' ]
             
-            self._subject_text.SetLabel( HydrusData.ToString( account_info ) )
+            self._subject_text.SetLabel( HydrusData.ToUnicode( account_info ) )
             
         
         if len( self._subject_identifiers ) > 1: wx.MessageBox( 'Done!' )
@@ -3404,19 +3442,23 @@ class DialogPathsToTags( Dialog ):
                 
                 self._tags_panel = ClientGUICommon.StaticBox( self, 'tags for all' )
                 
-                self._tags = ClientGUICommon.ListBoxTagsStrings( self._tags_panel, self.TagRemoved )
+                self._tags = ClientGUICommon.ListBoxTagsStrings( self._tags_panel, self.TagsRemoved )
                 
-                self._tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._tags_panel, self.AddTag, CC.LOCAL_FILE_SERVICE_KEY, service_key )
+                expand_parents = True
+                
+                self._tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._tags_panel, self.EnterTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key )
                 
                 #
                 
                 self._single_tags_panel = ClientGUICommon.StaticBox( self, 'tags just for selected files' )
                 
-                self._paths_to_single_tags = collections.defaultdict( list )
+                self._paths_to_single_tags = collections.defaultdict( set )
                 
-                self._single_tags = ClientGUICommon.ListBoxTagsStrings( self._single_tags_panel, self.SingleTagRemoved )
+                self._single_tags = ClientGUICommon.ListBoxTagsStrings( self._single_tags_panel, self.SingleTagsRemoved )
                 
-                self._single_tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.AddTagSingle, CC.LOCAL_FILE_SERVICE_KEY, service_key )
+                expand_parents = True
+                
+                self._single_tag_box = ClientGUICommon.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.EnterTagsSingle, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key )
                 
             
             def PopulateControls():
@@ -3544,13 +3586,16 @@ class DialogPathsToTags( Dialog ):
                 except: pass
                 
             
-            if path in self._paths_to_single_tags: tags.extend( self._paths_to_single_tags[ path ] )
+            if path in self._paths_to_single_tags:
+                
+                tags.extend( list( self._paths_to_single_tags[ path ] ) )
+                
             
             num_namespace = self._num_namespace.GetValue()
             
             if num_namespace != '':
                 
-                tags.append( num_namespace + ':' + HydrusData.ToString( num ) )
+                tags.append( num_namespace + ':' + str( num ) )
                 
             
             tags = HydrusTags.CleanTags( tags )
@@ -3581,53 +3626,66 @@ class DialogPathsToTags( Dialog ):
                 
             
         
-        def AddTag( self, tag, parents = None ):
-            
-            if parents is None: parents = []
-            
-            if tag is not None:
-                
-                self._tags.AddTag( tag, parents )
-                
-                self._RefreshFileList()
-                
-            
-        
-        def AddTagSingle( self, tag, parents = None ):
-            
-            if parents is None: parents = []
-            
-            if tag is not None:
-                
-                self._single_tags.AddTag( tag, parents )
-                
-                indices = self._paths_list.GetAllSelected()
-                
-                for index in indices:
-                    
-                    ( ( original_num, processed_num ), path, old_tags ) = self._paths_list.GetClientData( index )
-                    
-                    if tag in self._paths_to_single_tags[ path ]: self._paths_to_single_tags[ path ].remove( tag )
-                    else:
-                        
-                        self._paths_to_single_tags[ path ].append( tag )
-                        
-                        for parent in parents:
-                            
-                            if parent not in self._paths_to_single_tags[ path ]: self._paths_to_single_tags[ path ].append( parent )
-                            
-                        
-                    
-                
-                self._RefreshFileList()
-                
-            
-        
         def DeleteQuickNamespaces( self ):
             
             self._quick_namespaces_list.RemoveAllSelected()
             
             self._RefreshFileList()
+            
+        
+        def EnterTags( self, tags, parents = None ):
+            
+            if parents is None:
+                
+                parents = []
+                
+            
+            if len( tags ) > 0:
+                
+                self._tags.EnterTags( tags )
+                self._tags.AddTags( parents )
+                
+                self._RefreshFileList()
+                
+            
+        
+        def EnterTagsSingle( self, tags, parents = None ):
+            
+            if parents is None:
+                
+                parents = []
+                
+            
+            if len( tags ) > 0:
+                
+                self._single_tags.EnterTags( tags )
+                self._single_tags.AddTags( parents )
+                
+                indices = self._paths_list.GetAllSelected()
+                
+                for index in indices:
+                    
+                    ( ( original_num, processed_num ), path, old_pretty_tags ) = self._paths_list.GetClientData( index )
+                    
+                    current_tags = self._paths_to_single_tags[ path ]
+                    
+                    for tag in tags:
+                        
+                        if tag in current_tags:
+                            
+                            current_tags.discard( tag )
+                            
+                        else:
+                            
+                            current_tags.add( tag )
+                            
+                        
+                    
+                    current_tags.update( parents )
+                    
+                
+                self._RefreshFileList()
+                
             
         
         def EventAddRegex( self, event ):
@@ -3644,7 +3702,7 @@ class DialogPathsToTags( Dialog ):
                     
                     text = 'That regex would not compile!'
                     text += os.linesep * 2
-                    text += HydrusData.ToString( e )
+                    text += HydrusData.ToUnicode( e )
                     
                     wx.MessageBox( text )
                     
@@ -3708,7 +3766,10 @@ class DialogPathsToTags( Dialog ):
                     
                     path = self._paths_list.GetClientData( index )[1]
                     
-                    if path in self._paths_to_single_tags: single_tags.update( self._paths_to_single_tags[ path ] )
+                    if path in self._paths_to_single_tags:
+                        
+                        single_tags.update( self._paths_to_single_tags[ path ] )
+                        
                     
                 
                 self._single_tag_box.Enable()
@@ -3760,7 +3821,7 @@ class DialogPathsToTags( Dialog ):
         
         def SetTagBoxFocus( self ): self._tag_box.SetFocus()
         
-        def SingleTagRemoved( self, tag ):
+        def SingleTagsRemoved( self, tags ):
             
             indices = self._paths_list.GetAllSelected()
             
@@ -3768,13 +3829,18 @@ class DialogPathsToTags( Dialog ):
                 
                 ( ( original_num, processed_num ), path, old_tags ) = self._paths_list.GetClientData( index )
                 
-                if tag in self._paths_to_single_tags[ path ]: self._paths_to_single_tags[ path ].remove( tag )
+                current_tags = self._paths_to_single_tags[ path ]
+                
+                current_tags.difference_update( tags )
                 
             
             self._RefreshFileList()
             
         
-        def TagRemoved( self, tag ): self._RefreshFileList()
+        def TagsRemoved( self, tag ):
+            
+            self._RefreshFileList()
+            
         
     
 class DialogRegisterService( Dialog ):
@@ -4241,7 +4307,7 @@ class DialogSetupExport( Dialog ):
         
         self._tags_box = ClientGUICommon.StaticBoxSorterForListBoxTags( self, 'files\' tags' )
         
-        t = ClientGUICommon.ListBoxTagsSelection( self._tags_box, collapse_siblings = True )
+        t = ClientGUICommon.ListBoxTagsSelection( self._tags_box, include_counts = True, collapse_siblings = True )
         
         self._tags_box.SetTagsBox( t )
         
@@ -4284,7 +4350,7 @@ class DialogSetupExport( Dialog ):
             
             mime = media.GetMime()
             
-            pretty_tuple = ( HydrusData.ToString( i + 1 ), HC.mime_string_lookup[ mime ], '' )
+            pretty_tuple = ( str( i + 1 ), HC.mime_string_lookup[ mime ], '' )
             data_tuple = ( ( i, media ), mime, '' )
             
             self._paths.Append( pretty_tuple, data_tuple )
@@ -4344,15 +4410,11 @@ class DialogSetupExport( Dialog ):
     
     def _GetPath( self, media, terms ):
         
-        directory = self._directory_picker.GetPath()
+        directory = HydrusData.ToUnicode( self._directory_picker.GetPath() )
         
         filename = ClientFiles.GenerateExportFilename( media, terms )
         
-        mime = media.GetMime()
-        
-        ext = HC.mime_ext_lookup[ mime ]
-        
-        return directory + os.path.sep + filename + ext
+        return os.path.join( directory, filename )
         
     
     def _RecalcPaths( self ):
@@ -4371,9 +4433,9 @@ class DialogSetupExport( Dialog ):
                 
                 i = 1
                 
-                while self._GetPath( media, terms + [ ( 'string', HydrusData.ToString( i ) ) ] ) in all_paths: i += 1
+                while self._GetPath( media, terms + [ ( 'string', str( i ) ) ] ) in all_paths: i += 1
                 
-                path = self._GetPath( media, terms + [ ( 'string', HydrusData.ToString( i ) ) ] )
+                path = self._GetPath( media, terms + [ ( 'string', str( i ) ) ] )
                 
             
             all_paths.add( path )
@@ -4382,7 +4444,7 @@ class DialogSetupExport( Dialog ):
                 
                 mime = media.GetMime()
                 
-                self._paths.UpdateRow( index, ( HydrusData.ToString( ordering_index + 1 ), HC.mime_string_lookup[ mime ], path ), ( ( ordering_index, media ), mime, path ) )
+                self._paths.UpdateRow( index, ( str( ordering_index + 1 ), HC.mime_string_lookup[ mime ], path ), ( ( ordering_index, media ), mime, path ) )
                 
             
         
@@ -4420,7 +4482,7 @@ class DialogSetupExport( Dialog ):
                     
                     filename = ClientFiles.GenerateExportFilename( media, terms )
                     
-                    txt_path = directory + os.path.sep + filename + '.txt'
+                    txt_path = os.path.join( directory, filename + '.txt' )
                     
                     with open( txt_path, 'wb' ) as f:
                         
@@ -4437,7 +4499,7 @@ class DialogSetupExport( Dialog ):
                 
             except:
                 
-                wx.MessageBox( 'Encountered a problem while attempting to export file with index ' + HydrusData.ToString( ordering_index + 1 ) + ':' + os.linesep * 2 + traceback.format_exc() )
+                wx.MessageBox( 'Encountered a problem while attempting to export file with index ' + str( ordering_index + 1 ) + ':' + os.linesep * 2 + traceback.format_exc() )
                 
                 break
                 
@@ -4452,7 +4514,7 @@ class DialogSetupExport( Dialog ):
             
             try:
                 
-                HydrusFileHandling.LaunchDirectory( directory )
+                HydrusPaths.LaunchDirectory( directory )
                 
             except: wx.MessageBox( 'Could not open that location!' )
         
@@ -4641,7 +4703,7 @@ class DialogShortcuts( Dialog ):
                 
                 if name == '': return
                 
-                while self._shortcuts.NameExists( name ): name += HydrusData.ToString( random.randint( 0, 9 ) )
+                while self._shortcuts.NameExists( name ): name += str( random.randint( 0, 9 ) )
                 
                 shortcuts = ClientData.Shortcuts( name )
                 

@@ -10,6 +10,7 @@ import HydrusData
 import HydrusExceptions
 import HydrusFileHandling
 import HydrusGlobals
+import HydrusPaths
 import HydrusSerialisable
 import json
 import os
@@ -190,7 +191,7 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
                 
             elif status == CC.STATUS_NEW:
                 
-                ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+                ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
                 
                 try:
                     
@@ -211,7 +212,7 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
                     
                 finally:
                     
-                    HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+                    HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
                     
                 
             
@@ -231,7 +232,7 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
                 HydrusGlobals.client_controller.pub( 'add_media_results', page_key, ( media_result, ) )
                 
             
-        except Exception as e:
+        except Exception:
             
             error_text = traceback.format_exc()
             
@@ -353,16 +354,30 @@ class GalleryImport( HydrusSerialisable.SerialisableBase ):
             
         except Exception as e:
             
-            traceback.print_exc()
+            if isinstance( e, HydrusExceptions.NotFoundException ):
+                
+                text = 'Gallery 404'
+                
+            else:
+                
+                text = str( e )
+                
+                traceback.print_exc()
+                
             
             with self._lock:
                 
                 self._current_gallery_stream_identifier = None
                 
-                self._SetGalleryStatus( page_key, str( e ) )
+                self._SetGalleryStatus( page_key, text )
                 
             
             time.sleep( 5 )
+            
+        
+        with self._lock:
+            
+            self._SetGalleryStatus( page_key, 'waiting politely' )
             
         
         time.sleep( HC.options[ 'website_download_polite_wait' ] )
@@ -774,9 +789,9 @@ HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIAL
 class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_IMPORT_FOLDER
-    SERIALISABLE_VERSION = 1
+    SERIALISABLE_VERSION = 2
     
-    def __init__( self, name, path = '', import_file_options = None, mimes = None, actions = None, action_locations = None, period = 3600, open_popup = True, tag = None ):
+    def __init__( self, name, path = '', import_file_options = None, import_tag_options = None, mimes = None, actions = None, action_locations = None, period = 3600, open_popup = True ):
         
         if mimes is None:
             
@@ -786,6 +801,13 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         if import_file_options is None:
             
             import_file_options = ClientDefaults.GetDefaultImportFileOptions()
+            
+        
+        if import_tag_options is None:
+            
+            new_options = HydrusGlobals.client_controller.GetNewOptions()
+            
+            import_tag_options = new_options.GetDefaultImportTagOptions( ClientDownloading.GalleryIdentifier( HC.SITE_TYPE_DEFAULT ) )
             
         
         if actions is None:
@@ -808,11 +830,11 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         self._path = path
         self._mimes = mimes
         self._import_file_options = import_file_options
+        self._import_tag_options = import_tag_options
         self._actions = actions
         self._action_locations = action_locations
         self._period = period
         self._open_popup = open_popup
-        self._tag = tag
         
         self._path_cache = SeedCache()
         self._last_checked = 0
@@ -878,7 +900,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                             
                             filename = os.path.basename( path )
                             
-                            dest_path = dest_dir + os.path.sep + filename
+                            dest_path = os.path.join( dest_dir, filename )
                             
                             while os.path.exists( dest_path ):
                                 
@@ -914,24 +936,49 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
     def _GetSerialisableInfo( self ):
         
         serialisable_import_file_options = self._import_file_options.GetSerialisableTuple()
+        serialisable_import_tag_options = self._import_tag_options.GetSerialisableTuple()
         serialisable_path_cache = self._path_cache.GetSerialisableTuple()
         
         # json turns int dict keys to strings
         action_pairs = self._actions.items()
         action_location_pairs = self._action_locations.items()
         
-        return ( self._path, self._mimes, serialisable_import_file_options, action_pairs, action_location_pairs, self._period, self._open_popup, self._tag, serialisable_path_cache, self._last_checked, self._paused )
+        return ( self._path, self._mimes, serialisable_import_file_options, serialisable_import_tag_options, action_pairs, action_location_pairs, self._period, self._open_popup, serialisable_path_cache, self._last_checked, self._paused )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( self._path, self._mimes, serialisable_import_file_options, action_pairs, action_location_pairs, self._period, self._open_popup, self._tag, serialisable_path_cache, self._last_checked, self._paused ) = serialisable_info
+        ( self._path, self._mimes, serialisable_import_file_options, serialisable_import_tag_options, action_pairs, action_location_pairs, self._period, self._open_popup, serialisable_path_cache, self._last_checked, self._paused ) = serialisable_info
         
         self._actions = dict( action_pairs )
         self._action_locations = dict( action_location_pairs )
         
         self._import_file_options = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_import_file_options )
+        self._import_tag_options = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_import_tag_options )
         self._path_cache = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_path_cache )
+        
+    
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( path, mimes, serialisable_import_file_options, action_pairs, action_location_pairs, period, open_popup, tag, serialisable_path_cache, last_checked, paused ) = old_serialisable_info
+            
+            service_keys_to_explicit_tags = {}
+            
+            if tag is not None:
+                
+                service_keys_to_explicit_tags[ CC.LOCAL_TAG_SERVICE_KEY ] = { tag }
+                
+            
+            import_tag_options = ClientData.ImportTagOptions( service_keys_to_explicit_tags = service_keys_to_explicit_tags )
+            
+            serialisable_import_tag_options = import_tag_options.GetSerialisableTuple()
+            
+            new_serialisable_info = ( path, mimes, serialisable_import_file_options, serialisable_import_tag_options, action_pairs, action_location_pairs, period, open_popup, serialisable_path_cache, last_checked, paused )
+            
+            return ( 2, new_serialisable_info )
+            
         
     
     def DoWork( self ):
@@ -945,9 +992,9 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
             
             if os.path.exists( self._path ) and os.path.isdir( self._path ):
                 
-                filenames = os.listdir( self._path )
+                filenames = os.listdir( HydrusData.ToUnicode( self._path ) )
                 
-                raw_paths = [ self._path + os.path.sep + filename for filename in filenames ]
+                raw_paths = [ os.path.join( self._path, filename ) for filename in filenames ]
                 
                 all_paths = ClientFiles.GetAllPaths( raw_paths )
                 
@@ -976,22 +1023,13 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                         
                         if mime in self._mimes:
                             
-                            if self._tag is None:
-                                
-                                service_keys_to_tags = {}
-                                
-                            else:
-                                
-                                service_keys_to_tags = { CC.LOCAL_TAG_SERVICE_KEY : [ self._tag ] }
-                                
-                            
                             ( status, hash ) = HydrusGlobals.client_controller.WriteSynchronous( 'import_file', path, import_file_options = self._import_file_options )
                             
                             self._path_cache.UpdateSeedStatus( path, status )
                             
                             if status in ( CC.STATUS_SUCCESSFUL, CC.STATUS_REDUNDANT ):
                                 
-                                service_keys_to_content_updates = ClientData.ConvertServiceKeysToTagsToServiceKeysToContentUpdates( { hash }, service_keys_to_tags )
+                                service_keys_to_content_updates = self._import_tag_options.GetServiceKeysToContentUpdates( hash, set() )
                                 
                                 if len( service_keys_to_content_updates ) > 0:
                                     
@@ -1009,7 +1047,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                             self._path_cache.UpdateSeedStatus( path, CC.STATUS_UNINTERESTING_MIME )
                             
                         
-                    except Exception as e:
+                    except Exception:
                         
                         error_text = traceback.format_exc()
                         
@@ -1046,15 +1084,15 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
     
     def ToListBoxTuple( self ):
         
-        return ( self._name, self._path, self._period, self._tag )
+        return ( self._name, self._path, self._period )
         
     
     def ToTuple( self ):
         
-        return ( self._name, self._path, self._mimes, self._import_file_options, self._actions, self._action_locations, self._period, self._open_popup, self._tag, self._paused )
+        return ( self._name, self._path, self._mimes, self._import_file_options, self._import_tag_options, self._actions, self._action_locations, self._period, self._open_popup, self._paused )
         
     
-    def SetTuple( self, name, path, mimes, import_file_options, actions, action_locations, period, open_popup, tag, paused ):
+    def SetTuple( self, name, path, mimes, import_file_options, import_tag_options, actions, action_locations, period, open_popup, paused ):
         
         if path != self._path:
             
@@ -1070,11 +1108,11 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         self._path = path
         self._mimes = mimes
         self._import_file_options = import_file_options
+        self._import_tag_options
         self._actions = actions
         self._action_locations = action_locations
         self._period = period
         self._open_popup = open_popup
-        self._tag = tag
         self._paused = paused
         
     
@@ -1168,7 +1206,7 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
             
             if status == CC.STATUS_NEW:
                 
-                ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+                ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
                 
                 try:
                     
@@ -1190,7 +1228,7 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
                     
                 finally:
                     
-                    HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+                    HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
                     
                 
             
@@ -1203,7 +1241,7 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
                 HydrusGlobals.client_controller.pub( 'add_media_results', page_key, ( media_result, ) )
                 
             
-        except Exception as e:
+        except Exception:
             
             error_text = traceback.format_exc()
             print( error_text )
@@ -1228,8 +1266,6 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
     
     def _WorkOnQueue( self, page_key ):
         
-        do_wait = False
-        
         file_url = self._urls_cache.GetNextSeed( CC.STATUS_UNKNOWN )
         
         if file_url is not None:
@@ -1238,6 +1274,8 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
             
         
         if len( self._pending_page_urls ) > 0:
+            
+            do_wait = False
             
             with self._lock:
                 
@@ -1315,7 +1353,17 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
                 
                 error_occurred = True
                 
-                parser_status = HydrusData.ToString( e )
+                parser_status = HydrusData.ToUnicode( e )
+                
+            
+            if not error_occurred and do_wait:
+                
+                with self._lock:
+                    
+                    self._SetParserStatus( page_key, 'waiting politely' )
+                    
+                
+                time.sleep( HC.options[ 'website_download_polite_wait' ] )
                 
             
             with self._lock:
@@ -1325,8 +1373,6 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
                 
             
             if error_occurred:
-                
-                HydrusGlobals.client_controller.pub( 'update_status', page_key )
                 
                 time.sleep( 5 )
                 
@@ -1340,11 +1386,6 @@ class PageOfImagesImport( HydrusSerialisable.SerialisableBase ):
             
         
         HydrusGlobals.client_controller.pub( 'update_status', page_key )
-        
-        if do_wait:
-            
-            time.sleep( HC.options[ 'website_download_polite_wait' ] )
-            
         
     
     def _THREADWork( self, page_key ):
@@ -1730,10 +1771,10 @@ class SeedCache( HydrusSerialisable.SerialisableBase ):
             
             status_strings = []
             
-            if num_successful > 0: status_strings.append( HydrusData.ToString( num_successful ) + ' successful' )
-            if num_failed > 0: status_strings.append( HydrusData.ToString( num_failed ) + ' failed' )
-            if num_deleted > 0: status_strings.append( HydrusData.ToString( num_deleted ) + ' already deleted' )
-            if num_redundant > 0: status_strings.append( HydrusData.ToString( num_redundant ) + ' already in db' )
+            if num_successful > 0: status_strings.append( str( num_successful ) + ' successful' )
+            if num_failed > 0: status_strings.append( str( num_failed ) + ' failed' )
+            if num_deleted > 0: status_strings.append( str( num_deleted ) + ' already deleted' )
+            if num_redundant > 0: status_strings.append( str( num_redundant ) + ' already in db' )
             
             status = ', '.join( status_strings )
             
@@ -1823,8 +1864,6 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         self._gallery_identifier = ClientDownloading.GalleryIdentifier( HC.SITE_TYPE_DEVIANT_ART )
         
         self._gallery_stream_identifiers = ClientDownloading.GetGalleryStreamIdentifiers( self._gallery_identifier )
-        
-        ( namespaces, search_value ) = ClientDefaults.GetDefaultNamespacesAndSearchValue( self._gallery_identifier )
         
         self._query = ''
         self._period = 86400 * 7
@@ -1937,10 +1976,12 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                         
                         tags = gallery.GetTags( url, report_hooks = [ hook ] )
                         
+                        do_wait = True
+                        
                     
                 elif status == CC.STATUS_NEW:
                     
-                    ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+                    ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
                     
                     try:
                         
@@ -1965,7 +2006,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                         
                     finally:
                         
-                        HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+                        HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
                         
                     
                 
@@ -2151,7 +2192,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         if error_next_check_time > periodic_next_check_time and not HydrusData.TimeHasPassed( error_next_check_time ):
             
-            interim_text = ' | due to error + ' + HydrusData.ConvertTimestampToPrettySync( self._last_error ) + ', next check '
+            interim_text = ' | due to error ' + HydrusData.ConvertTimestampToPrettySync( self._last_error ) + ', next check '
             next_check_time = error_next_check_time
             
         else:
@@ -2358,7 +2399,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
             
             if status == CC.STATUS_NEW:
                 
-                ( os_file_handle, temp_path ) = HydrusFileHandling.GetTempPath()
+                ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
                 
                 try:
                     
@@ -2380,7 +2421,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                 finally:
                     
-                    HydrusFileHandling.CleanUpTempPath( os_file_handle, temp_path )
+                    HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
                     
                 
             
@@ -2429,6 +2470,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
     def _WorkOnThread( self, page_key ):
         
         do_wait = False
+        error_occurred = False
         
         with self._lock:
             
@@ -2444,8 +2486,6 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
             
             HydrusGlobals.client_controller.pub( 'update_status', page_key )
-            
-            error_occurred = False
             
             try:
                 
@@ -2468,7 +2508,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                         continue
                         
                     
-                    file_url = file_base + HydrusData.ToString( post[ 'tim' ] ) + post[ 'ext' ]
+                    file_url = file_base + str( post[ 'tim' ] ) + post[ 'ext' ]
                     file_md5_base64 = post[ 'md5' ]
                     file_original_filename = post[ 'filename' ] + post[ 'ext' ]
                     
@@ -2483,7 +2523,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                                 continue
                                 
                             
-                            file_url = file_base + HydrusData.ToString( extra_file[ 'tim' ] ) + extra_file[ 'ext' ]
+                            file_url = file_base + str( extra_file[ 'tim' ] ) + extra_file[ 'ext' ]
                             file_md5_base64 = extra_file[ 'md5' ]
                             file_original_filename = extra_file[ 'filename' ] + extra_file[ 'ext' ]
                             
@@ -2529,7 +2569,7 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 error_occurred = True
                 
-                watcher_status = HydrusData.ToString( e )
+                watcher_status = HydrusData.ToUnicode( e )
                 
             
             with self._lock:
@@ -2546,15 +2586,6 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                 
                 self._last_time_checked = HydrusData.GetNow()
-                self._SetWatcherStatus( page_key, watcher_status )
-                self._RegenerateSeedCacheStatus( page_key )
-                
-            
-            if error_occurred:
-                
-                HydrusGlobals.client_controller.pub( 'update_status', page_key )
-                
-                time.sleep( 5 )
                 
             
         else:
@@ -2572,20 +2603,34 @@ class ThreadWatcherImport( HydrusSerialisable.SerialisableBase ):
                         delay = self._check_period
                         
                     
-                    self._SetWatcherStatus( page_key, 'checking again in ' + HydrusData.ConvertTimestampToPrettyPending( self._last_time_checked + delay ) + ' seconds' )
+                    watcher_status = 'checking again in ' + HydrusData.ConvertTimestampToPrettyPending( self._last_time_checked + delay ) + ' seconds'
                     
                 else:
                     
-                    self._SetWatcherStatus( page_key, 'checking finished' )
+                    watcher_status = 'checking finished'
                     
                 
             
         
-        HydrusGlobals.client_controller.pub( 'update_status', page_key )
-        
-        if do_wait:
+        if not error_occurred and do_wait:
+            
+            with self._lock:
+                
+                self._SetWatcherStatus( page_key, 'waiting politely' )
+                
             
             time.sleep( HC.options[ 'website_download_polite_wait' ] )
+            
+        
+        with self._lock:
+            
+            self._SetWatcherStatus( page_key, watcher_status )
+            self._RegenerateSeedCacheStatus( page_key )
+            
+        
+        if error_occurred:
+            
+            time.sleep( 5 )
             
         
     
